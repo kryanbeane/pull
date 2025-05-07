@@ -57,6 +57,7 @@ function getDefaultPullConfig(
           {
             base: `${defaultBranch}`,
             upstream: `${upstreamOwner}:${defaultBranch}`,
+            workingBranch: `sync-${defaultBranch}`,
             mergeMethod: appConfig.defaultMergeMethod,
           },
         ],

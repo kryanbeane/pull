@@ -50,6 +50,61 @@ export class Pull {
     this.config = result.data;
   }
 
+  private async getWorkingBranchName(upstream: string): Promise<string> {
+    const rule = this.config.rules.find(r => r.upstream === upstream);
+    const upstreamBranch = upstream.split(':')[1];
+    const pattern = rule?.workingBranch || 'sync-{upstream}';
+    return pattern.replace('{upstream}', upstreamBranch);
+  }
+
+
+  private async ensureWorkingBranch(upstream: string): Promise<string> {
+    const workingBranch = await this.getWorkingBranchName(upstream);
+
+    try {
+      // Check if working branch exists
+      await this.github.repos.getBranch({
+        owner: this.owner,
+        repo: this.repo,
+        branch: workingBranch,
+      });
+    } catch {
+      // Create working branch from upstream
+      const upstreamRef = await this.github.git.getRef({
+        owner: this.owner,
+        repo: this.repo,
+        ref: `heads/${upstream}`,
+      });
+
+      await this.github.git.createRef({
+        owner: this.owner,
+        repo: this.repo,
+        ref: `refs/heads/${workingBranch}`,
+        sha: upstreamRef.data.object.sha,
+      });
+    }
+
+    return workingBranch;
+  }
+
+  private async updateWorkingBranch(workingBranch: string, upstream: string): Promise<void> {
+    // Get latest upstream commit
+    const upstreamRef = await this.github.git.getRef({
+      owner: this.owner,
+      repo: this.repo,
+      ref: `heads/${upstream}`,
+    });
+
+    // Update working branch to match upstream
+    await this.github.git.updateRef({
+      owner: this.owner,
+      repo: this.repo,
+      ref: `heads/${workingBranch}`,
+      sha: upstreamRef.data.object.sha,
+      force: true,
+    });
+  }
+
   async routineCheck(): Promise<void> {
     this.logger.info(
       { config: this.config },
@@ -72,24 +127,29 @@ export class Pull {
         continue;
       }
 
-      if (!(await this.hasDiff(base, upstream))) {
+      // Ensure working branch exists and is up to date
+      const workingBranch = await this.ensureWorkingBranch(upstream);
+      await this.updateWorkingBranch(workingBranch, upstream);
+
+      // Check for differences between working branch and base
+      if (!(await this.hasDiff(base, workingBranch))) {
         this.logger.debug(
-          `${base} is in sync with ${upstream}`,
+          `${base} is in sync with ${workingBranch}`,
         );
         continue;
       }
 
-      const openPR = await this.getOpenPR(base, upstream);
+      const openPR = await this.getOpenPR(base, workingBranch);
       if (openPR) {
         this.logger.debug(
-          `Found a PR from ${upstream} to ${base}`,
+          `Found a PR from ${workingBranch} to ${base}`,
         );
         await this.checkAutoMerge(openPR);
       } else {
         this.logger.info(
-          `Creating PR from ${upstream} to ${base}`,
+          `Creating PR from ${workingBranch} to ${base}`,
         );
-        const newPR = await this.createPR(base, upstream, assignees, reviewers);
+        const newPR = await this.createPR(base, workingBranch, assignees, reviewers);
         await this.checkAutoMerge(newPR);
       }
     }
@@ -299,9 +359,9 @@ export class Pull {
       if (
         pr.data.user.login === appConfig.botName &&
         pr.data.base.label.replace(`${this.owner}:`, "") ===
-          base.replace(`${this.owner}:`, "") &&
+        base.replace(`${this.owner}:`, "") &&
         pr.data.head.label.replace(`${this.owner}:`, "") ===
-          head.replace(`${this.owner}:`, "")
+        head.replace(`${this.owner}:`, "")
       ) {
         return pr.data;
       }

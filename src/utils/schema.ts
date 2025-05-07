@@ -11,6 +11,9 @@ const pullMergeMethodEnum = z.enum([
 const pullRuleSchema = z.object({
   base: z.string().min(1).describe("Destination local branch"),
   upstream: z.string().min(1).describe("Upstream owner:branch"),
+  workingBranch: z.string().min(1).optional().describe(
+    "Working branch pattern for syncing upstream changes. Use {upstream} as placeholder for upstream branch name. Default: 'sync-{upstream}'"
+  ),
   mergeMethod: pullMergeMethodEnum.default("none").describe(
     "Auto merge pull request using this merge method. one of [none, merge, squash, rebase, hardreset], Default: none",
   ),
